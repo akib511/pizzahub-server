@@ -512,6 +512,76 @@ app.get("/orders/customer/:email", async (req, res) => {
 });
 
 
+
+// Customer Cancel Order API
+
+
+app.patch("/orders/:id/cancel", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { customerEmail } = req.body;
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).send({
+        message: "Invalid order ID",
+      });
+    }
+
+    if (!customerEmail) {
+      return res.status(400).send({
+        message: "Customer email is required",
+      });
+    }
+
+    // Find order
+    const order = await ordersCollection.findOne({
+      _id: new ObjectId(id),
+    });
+
+    if (!order) {
+      return res.status(404).send({
+        message: "Order not found",
+      });
+    }
+
+    // Check order ownership
+    if (order.customerEmail !== customerEmail) {
+      return res.status(403).send({
+        message: "You cannot cancel this order",
+      });
+    }
+
+    // Only pending orders can be cancelled
+    if (order.status !== "pending") {
+      return res.status(400).send({
+        message: "Only pending orders can be cancelled",
+      });
+    }
+
+    await ordersCollection.updateOne(
+      { _id: new ObjectId(id) },
+      {
+        $set: {
+          status: "cancelled",
+          updatedAt: new Date(),
+        },
+      }
+    );
+
+    res.send({
+      message: "Order cancelled successfully",
+    });
+  } catch (error) {
+    console.error("Failed to cancel order:", error);
+
+    res.status(500).send({
+      message: "Failed to cancel order",
+    });
+  }
+});
+
+
+
 app.listen(PORT, () => {
   console.log(`PizzaHub server running on port ${PORT}`);
 });
