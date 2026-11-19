@@ -6,6 +6,7 @@ import cors from "cors";
 const app = express();
 let menuCollection;
 let usersCollection;
+let ordersCollection;
 const PORT = process.env.PORT || 5000;
 
 // Middleware
@@ -25,7 +26,7 @@ export async function connectToMongoDB() {
     const db = client.db("PizzaHub");
 
      menuCollection = db.collection("menuItems");
-    const ordersCollection = db.collection("orders");
+    ordersCollection = db.collection("orders");
     const transactionsCollection = db.collection("transactions");
     usersCollection = db.collection("user");
 
@@ -368,6 +369,127 @@ app.patch("/admin/menu/:id/status", async (req, res) => {
     });
   }
 });
+
+
+//customer er API
+
+// Customer Place Order API
+app.post("/orders", async (req, res) => {
+  try {
+    const {
+      itemId,
+      customerEmail,
+      quantity,
+      deliveryDate,
+      deliveryAddress,
+      message,
+    } = req.body;
+
+    // Validate required fields
+    if (
+      !itemId ||
+      !customerEmail ||
+      !quantity ||
+      !deliveryDate ||
+      !deliveryAddress
+    ) {
+      return res.status(400).send({
+        message: "Please provide all required order information",
+      });
+    }
+
+    if (!ObjectId.isValid(itemId)) {
+      return res.status(400).send({
+        message: "Invalid menu item ID",
+      });
+    }
+
+    if (!Number.isInteger(quantity) || quantity < 1) {
+      return res.status(400).send({
+        message: "Quantity must be a positive number",
+      });
+    }
+
+    // Find customer
+    const customer = await usersCollection.findOne({
+      email: customerEmail,
+    });
+
+    if (!customer) {
+      return res.status(404).send({
+        message: "Customer not found",
+      });
+    }
+
+    if (["vendor", "admin"].includes(customer.role)) {
+      return res.status(403).send({
+        message: "Only customers can place orders",
+      });
+    }
+
+    // Find menu item
+    const item = await menuCollection.findOne({
+      _id: new ObjectId(itemId),
+      status: "approved",
+      available: true,
+    });
+
+    if (!item) {
+      return res.status(404).send({
+        message: "Pizza is not available for ordering",
+      });
+    }
+
+    // Find vendor
+    const vendor = await usersCollection.findOne({
+      email: item.vendorEmail,
+    });
+
+    if (!vendor) {
+      return res.status(404).send({
+        message: "Vendor not found",
+      });
+    }
+
+    // Calculate price from database
+    const totalPrice = Number(item.price) * quantity;
+
+    const order = {
+      itemId: item._id,
+      itemName: item.name,
+      itemImage: item.image,
+      vendorId: vendor._id,
+      vendorEmail: vendor.email,
+      customerId: customer._id,
+      customerName: customer.name,
+      customerEmail: customer.email,
+      quantity,
+      unitPrice: Number(item.price),
+      totalPrice,
+      deliveryDate: new Date(deliveryDate),
+      deliveryAddress,
+      message: message || "",
+      status: "pending",
+      createdAt: new Date(),
+    };
+
+    const result = await ordersCollection.insertOne(order);
+
+    res.status(201).send({
+      message: "Order placed successfully",
+      insertedId: result.insertedId,
+      totalPrice,
+    });
+  } catch (error) {
+    console.error("Failed to place order:", error);
+
+    res.status(500).send({
+      message: "Failed to place order",
+    });
+  }
+});
+
+
 
 app.listen(PORT, () => {
   console.log(`PizzaHub server running on port ${PORT}`);
