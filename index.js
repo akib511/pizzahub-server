@@ -1,4 +1,4 @@
-import { MongoClient } from 'mongodb';
+import { MongoClient ,ObjectId  } from 'mongodb';
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
@@ -51,7 +51,7 @@ app.get("/", (req, res) => {
 });
 
 
-// menu releted API
+// menu releted API-----
 
 // Get all menu items
 app.get("/menu", async (req, res) => {
@@ -90,6 +90,40 @@ app.post("/menu", async (req, res) => {
 
     res.status(500).send({
       message: "Failed to add menu item",
+    });
+  }
+});
+
+
+// Delete menu item
+app.delete("/menu/:id", async (req, res) => {
+  try {
+    const id = req.params.id;
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).send({
+        message: "Invalid menu item ID",
+      });
+    }
+
+    const result = await menuCollection.deleteOne({
+      _id: new ObjectId(id),
+    });
+
+    if (result.deletedCount === 0) {
+      return res.status(404).send({
+        message: "Menu item not found",
+      });
+    }
+
+    res.status(200).send({
+      message: "Menu item deleted successfully",
+    });
+  } catch (error) {
+    console.error("Failed to delete menu item:", error);
+
+    res.status(500).send({
+      message: "Failed to delete menu item",
     });
   }
 });
