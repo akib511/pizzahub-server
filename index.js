@@ -491,6 +491,27 @@ app.post("/orders", async (req, res) => {
 
 
 
+// Customer My Orders API
+app.get("/orders/customer/:email", async (req, res) => {
+  try {
+    const { email } = req.params;
+
+    const orders = await ordersCollection
+      .find({ customerEmail: email })
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    res.send(orders);
+  } catch (error) {
+    console.error("Failed to fetch customer orders:", error);
+
+    res.status(500).send({
+      message: "Failed to fetch customer orders",
+    });
+  }
+});
+
+
 app.listen(PORT, () => {
   console.log(`PizzaHub server running on port ${PORT}`);
 });
