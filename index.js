@@ -5,6 +5,7 @@ import cors from "cors";
 
 const app = express();
 let menuCollection;
+let usersCollection;
 const PORT = process.env.PORT || 5000;
 
 // Middleware
@@ -26,6 +27,7 @@ export async function connectToMongoDB() {
      menuCollection = db.collection("menuItems");
     const ordersCollection = db.collection("orders");
     const transactionsCollection = db.collection("transactions");
+    usersCollection = db.collection("user");
 
     console.log("MongoDB Connected Successfully!");
     console.log("Database: PizzaHub");
@@ -34,6 +36,7 @@ export async function connectToMongoDB() {
       client,
       db,
       menuCollection,
+      usersCollection,
       ordersCollection,
       transactionsCollection,
     };
@@ -166,6 +169,8 @@ app.patch("/menu/:id", async (req, res) => {
 
 
 // Update menu item availability (eye)
+
+// Update menu item availability (eye)
 app.patch("/menu/:id/availability", async (req, res) => {
   try {
     const id = req.params.id;
@@ -183,18 +188,55 @@ app.patch("/menu/:id/availability", async (req, res) => {
       });
     }
 
-    const result = await menuCollection.updateOne(
+    const item = await menuCollection.findOne({
+      _id: new ObjectId(id),
+    });
+
+    if (!item) {
+      return res.status(404).send({
+        message: "Menu item not found",
+      });
+    }
+
+    // Limit check only when making an item available
+    if (available === true) {
+      const vendor = await usersCollection.findOne({
+        email: item.vendorEmail,
+      });
+
+      if (!vendor) {
+        return res.status(404).send({
+          message: "Vendor not found",
+        });
+      }
+
+      const isPremium =
+        vendor.subscriptionPlan === "premium" &&
+        vendor.subscriptionExpiresAt &&
+        new Date(vendor.subscriptionExpiresAt) > new Date();
+
+      if (!isPremium) {
+        const activeItems = await menuCollection.countDocuments({
+          vendorEmail: item.vendorEmail,
+          status: "approved",
+          available: true,
+          _id: { $ne: new ObjectId(id) },
+        });
+
+        if (activeItems >= 3) {
+          return res.status(403).send({
+            message: "Free vendors can have only 3 active menu items. Upgrade to Premium for unlimited items.",
+          });
+        }
+      }
+    }
+
+    await menuCollection.updateOne(
       { _id: new ObjectId(id) },
       {
         $set: { available },
       }
     );
-
-    if (result.matchedCount === 0) {
-      return res.status(404).send({
-        message: "Menu item not found",
-      });
-    }
 
     res.status(200).send({
       message: "Menu availability updated successfully",
@@ -204,6 +246,95 @@ app.patch("/menu/:id/availability", async (req, res) => {
 
     res.status(500).send({
       message: "Failed to update menu availability",
+    });
+  }
+});
+
+
+//admin releted API
+
+// Admin approve or reject menu item
+app.patch("/admin/menu/:id/status", async (req, res) => {
+  try {
+    const id = req.params.id;
+    const { status } = req.body;
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).send({
+        message: "Invalid menu item ID",
+      });
+    }
+
+    if (!["approved", "rejected"].includes(status)) {
+      return res.status(400).send({
+        message: "Status must be approved or rejected",
+      });
+    }
+
+    const item = await menuCollection.findOne({
+      _id: new ObjectId(id),
+    });
+
+    if (!item) {
+      return res.status(404).send({
+        message: "Menu item not found",
+      });
+    }
+
+    if (item.status !== "pending") {
+      return res.status(400).send({
+        message: "Only pending items can be reviewed",
+      });
+    }
+
+    // Check vendor plan before approval
+    if (status === "approved") {
+      const vendor = await usersCollection.findOne({
+        email: item.vendorEmail,
+      });
+
+      if (!vendor) {
+        return res.status(404).send({
+          message: "Vendor not found",
+        });
+      }
+
+      const isPremium =
+        vendor.subscriptionPlan === "premium" &&
+        vendor.subscriptionExpiresAt &&
+        new Date(vendor.subscriptionExpiresAt) > new Date();
+
+      if (!isPremium) {
+        const activeItems = await menuCollection.countDocuments({
+          vendorEmail: item.vendorEmail,
+          status: "approved",
+          available: true,
+        });
+
+        if (activeItems >= 3) {
+          return res.status(403).send({
+            message:
+              "This vendor has reached the free plan limit of 3 active menu items.",
+          });
+        }
+      }
+    }
+
+    await menuCollection.updateOne(
+      { _id: new ObjectId(id) },
+      {
+        $set: { status },
+      }
+    );
+
+    res.status(200).send({
+      message: `Menu item ${status} successfully`,
+    });
+  } catch (error) {
+    console.error("Failed to review menu item:", error);
+
+    res.status(500).send({
+      message: "Failed to update menu item status",
     });
   }
 });
