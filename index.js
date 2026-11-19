@@ -581,6 +581,28 @@ app.patch("/orders/:id/cancel", async (req, res) => {
 });
 
 
+// vendors releted API
+
+// Vendor Orders API
+app.get("/orders/vendor/:email", async (req, res) => {
+  try {
+    const { email } = req.params;
+
+    const orders = await ordersCollection
+      .find({ vendorEmail: email })
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    res.send(orders);
+  } catch (error) {
+    console.error("Failed to fetch vendor orders:", error);
+
+    res.status(500).send({
+      message: "Failed to fetch vendor orders",
+    });
+  }
+});
+
 
 app.listen(PORT, () => {
   console.log(`PizzaHub server running on port ${PORT}`);
