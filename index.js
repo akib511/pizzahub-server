@@ -165,6 +165,50 @@ app.patch("/menu/:id", async (req, res) => {
 });
 
 
+// Update menu item availability (eye)
+app.patch("/menu/:id/availability", async (req, res) => {
+  try {
+    const id = req.params.id;
+    const { available } = req.body;
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).send({
+        message: "Invalid menu item ID",
+      });
+    }
+
+    if (typeof available !== "boolean") {
+      return res.status(400).send({
+        message: "Availability must be true or false",
+      });
+    }
+
+    const result = await menuCollection.updateOne(
+      { _id: new ObjectId(id) },
+      {
+        $set: { available },
+      }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).send({
+        message: "Menu item not found",
+      });
+    }
+
+    res.status(200).send({
+      message: "Menu availability updated successfully",
+    });
+  } catch (error) {
+    console.error("Failed to update availability:", error);
+
+    res.status(500).send({
+      message: "Failed to update menu availability",
+    });
+  }
+});
+
+
 app.listen(PORT, () => {
   console.log(`PizzaHub server running on port ${PORT}`);
 });
