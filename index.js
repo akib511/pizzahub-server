@@ -82,10 +82,35 @@ app.post("/menu", async (req, res) => {
       });
     }
 
-    const result = await menuCollection.insertOne(newItem);
+    if (!newItem.vendorEmail) {
+      return res.status(400).send({
+        message: "Vendor email is required",
+      });
+    }
+
+    const vendor = await usersCollection.findOne({
+      email: newItem.vendorEmail,
+    });
+
+    if (!vendor) {
+      return res.status(404).send({
+        message: "Vendor not found",
+      });
+    }
+
+    const menuItem = {
+      ...newItem,
+      status: "pending",
+      available: typeof newItem.available === "boolean"
+        ? newItem.available
+        : true,
+      createdAt: new Date(),
+    };
+
+    const result = await menuCollection.insertOne(menuItem);
 
     res.status(201).send({
-      message: "Menu item added successfully",
+      message: "Menu item submitted successfully. Waiting for admin approval.",
       insertedId: result.insertedId,
     });
   } catch (error) {
@@ -96,7 +121,6 @@ app.post("/menu", async (req, res) => {
     });
   }
 });
-
 
 // Delete menu item
 app.delete("/menu/:id", async (req, res) => {
@@ -285,39 +309,6 @@ app.patch("/admin/menu/:id/status", async (req, res) => {
       return res.status(400).send({
         message: "Only pending items can be reviewed",
       });
-    }
-
-    // Check vendor plan before approval
-    if (status === "approved") {
-      const vendor = await usersCollection.findOne({
-        email: item.vendorEmail,
-      });
-
-      if (!vendor) {
-        return res.status(404).send({
-          message: "Vendor not found",
-        });
-      }
-
-      const isPremium =
-        vendor.subscriptionPlan === "premium" &&
-        vendor.subscriptionExpiresAt &&
-        new Date(vendor.subscriptionExpiresAt) > new Date();
-
-      if (!isPremium) {
-        const activeItems = await menuCollection.countDocuments({
-          vendorEmail: item.vendorEmail,
-          status: "approved",
-          available: true,
-        });
-
-        if (activeItems >= 3) {
-          return res.status(403).send({
-            message:
-              "This vendor has reached the free plan limit of 3 active menu items.",
-          });
-        }
-      }
     }
 
     await menuCollection.updateOne(
