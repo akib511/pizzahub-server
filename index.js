@@ -604,6 +604,63 @@ app.get("/orders/vendor/:email", async (req, res) => {
 });
 
 
+// Vendor Accept / Reject Order API
+app.patch("/orders/:id/status", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { vendorEmail, status } = req.body;
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).send({ message: "Invalid order ID" });
+    }
+
+    if (!vendorEmail || !["accepted", "rejected"].includes(status)) {
+      return res.status(400).send({ message: "Invalid request data" });
+    }
+
+    const order = await ordersCollection.findOne({
+      _id: new ObjectId(id),
+    });
+
+    if (!order) {
+      return res.status(404).send({ message: "Order not found" });
+    }
+
+    if (order.vendorEmail !== vendorEmail) {
+      return res.status(403).send({ message: "You cannot manage this order" });
+    }
+
+    if (order.status !== "pending") {
+      return res.status(400).send({
+        message: "Only pending orders can be updated",
+      });
+    }
+
+    await ordersCollection.updateOne(
+      {
+        _id: new ObjectId(id),
+        vendorEmail,
+        status: "pending",
+      },
+      {
+        $set: {
+          status,
+          updatedAt: new Date(),
+        },
+      }
+    );
+
+    res.send({
+      success: true,
+      message: `Order ${status} successfully`,
+    });
+  } catch (error) {
+    console.error("Order status update failed:", error);
+    res.status(500).send({ message: "Failed to update order status" });
+  }
+});
+
+
 app.listen(PORT, () => {
   console.log(`PizzaHub server running on port ${PORT}`);
 });
