@@ -1,4 +1,4 @@
-import { MongoClient ,ObjectId  } from 'mongodb';
+import { MongoClient, ObjectId } from "mongodb";
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
@@ -13,10 +13,8 @@ const PORT = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json());
 
-
-
 const client = new MongoClient(
-  `mongodb://${process.env.MONGODB_USER}:${process.env.MONGODB_PASS}@ac-xbq99wb-shard-00-00.exnfvgb.mongodb.net:27017,ac-xbq99wb-shard-00-01.exnfvgb.mongodb.net:27017,ac-xbq99wb-shard-00-02.exnfvgb.mongodb.net:27017/?ssl=true&replicaSet=atlas-p0qrbv-shard-0&authSource=admin`
+  `mongodb://${process.env.MONGODB_USER}:${process.env.MONGODB_PASS}@ac-xbq99wb-shard-00-00.exnfvgb.mongodb.net:27017,ac-xbq99wb-shard-00-01.exnfvgb.mongodb.net:27017,ac-xbq99wb-shard-00-02.exnfvgb.mongodb.net:27017/?ssl=true&replicaSet=atlas-p0qrbv-shard-0&authSource=admin`,
 );
 
 export async function connectToMongoDB() {
@@ -25,7 +23,7 @@ export async function connectToMongoDB() {
 
     const db = client.db("PizzaHub");
 
-     menuCollection = db.collection("menuItems");
+    menuCollection = db.collection("menuItems");
     ordersCollection = db.collection("orders");
     const transactionsCollection = db.collection("transactions");
     usersCollection = db.collection("user");
@@ -48,12 +46,10 @@ export async function connectToMongoDB() {
 
 connectToMongoDB();
 
-
 // Test route
 app.get("/", (req, res) => {
   res.send("PizzaHub Server is Running!");
 });
-
 
 // menu releted API-----
 
@@ -102,9 +98,8 @@ app.post("/menu", async (req, res) => {
     const menuItem = {
       ...newItem,
       status: "pending",
-      available: typeof newItem.available === "boolean"
-        ? newItem.available
-        : true,
+      available:
+        typeof newItem.available === "boolean" ? newItem.available : true,
       createdAt: new Date(),
     };
 
@@ -172,7 +167,7 @@ app.patch("/menu/:id", async (req, res) => {
       { _id: new ObjectId(id) },
       {
         $set: updatedItem,
-      }
+      },
     );
 
     if (result.matchedCount === 0) {
@@ -191,8 +186,6 @@ app.patch("/menu/:id", async (req, res) => {
     });
   }
 });
-
-
 
 // Update menu item availability (eye)
 app.patch("/menu/:id/availability", async (req, res) => {
@@ -249,7 +242,8 @@ app.patch("/menu/:id/availability", async (req, res) => {
 
         if (activeItems >= 3) {
           return res.status(403).send({
-            message: "Free vendors can have only 3 active menu items. Upgrade to Premium for unlimited items.",
+            message:
+              "Free vendors can have only 3 active menu items. Upgrade to Premium for unlimited items.",
           });
         }
       }
@@ -259,7 +253,7 @@ app.patch("/menu/:id/availability", async (req, res) => {
       { _id: new ObjectId(id) },
       {
         $set: { available },
-      }
+      },
     );
 
     res.status(200).send({
@@ -273,7 +267,6 @@ app.patch("/menu/:id/availability", async (req, res) => {
     });
   }
 });
-
 
 //admin releted API
 // Admin approve or reject menu item
@@ -351,7 +344,7 @@ app.patch("/admin/menu/:id/status", async (req, res) => {
           status,
           available,
         },
-      }
+      },
     );
 
     res.status(200).send({
@@ -369,7 +362,6 @@ app.patch("/admin/menu/:id/status", async (req, res) => {
     });
   }
 });
-
 
 //customer er API
 
@@ -489,8 +481,6 @@ app.post("/orders", async (req, res) => {
   }
 });
 
-
-
 // Customer My Orders API
 app.get("/orders/customer/:email", async (req, res) => {
   try {
@@ -511,10 +501,7 @@ app.get("/orders/customer/:email", async (req, res) => {
   }
 });
 
-
-
 // Customer Cancel Order API
-
 
 app.patch("/orders/:id/cancel", async (req, res) => {
   try {
@@ -565,7 +552,7 @@ app.patch("/orders/:id/cancel", async (req, res) => {
           status: "cancelled",
           updatedAt: new Date(),
         },
-      }
+      },
     );
 
     res.send({
@@ -579,7 +566,6 @@ app.patch("/orders/:id/cancel", async (req, res) => {
     });
   }
 });
-
 
 // vendors releted API
 
@@ -602,7 +588,6 @@ app.get("/orders/vendor/:email", async (req, res) => {
     });
   }
 });
-
 
 // Vendor Accept / Reject Order API
 app.patch("/orders/:id/status", async (req, res) => {
@@ -647,7 +632,7 @@ app.patch("/orders/:id/status", async (req, res) => {
           status,
           updatedAt: new Date(),
         },
-      }
+      },
     );
 
     res.send({
@@ -660,6 +645,100 @@ app.patch("/orders/:id/status", async (req, res) => {
   }
 });
 
+// Vendor Profile API
+
+// Get Vendor Profile
+app.get("/vendor/profile/:email", async (req, res) => {
+  try {
+    const { email } = req.params;
+
+    const vendor = await usersCollection.findOne(
+      { email, role: "vendor" },
+      {
+        projection: {
+          name: 1,
+          email: 1,
+          phone: 1,
+          restaurantName: 1,
+          location: 1,
+          description: 1,
+          profileImage: 1,
+          restaurantLogo: 1,
+        },
+      },
+    );
+
+    if (!vendor) {
+      return res.status(404).send({
+        message: "Vendor not found",
+      });
+    }
+
+    res.send(vendor);
+  } catch (error) {
+    console.error("Failed to fetch vendor profile:", error);
+
+    res.status(500).send({
+      message: "Failed to fetch vendor profile",
+    });
+  }
+});
+
+// Update Vendor Profile
+app.patch("/vendor/profile/:email", async (req, res) => {
+  try {
+    const { email } = req.params;
+
+    const {
+      name,
+      phone,
+      restaurantName,
+      location,
+      description,
+      profileImage,
+      restaurantLogo,
+    } = req.body;
+
+    if (!name || !phone || !restaurantName || !location) {
+      return res.status(400).send({
+        message: "Please provide all required profile information",
+      });
+    }
+
+    const result = await usersCollection.updateOne(
+      { email, role: "vendor" },
+      {
+        $set: {
+          name,
+          phone,
+          restaurantName,
+          location,
+          description: description || "",
+          profileImage,
+          restaurantLogo,
+          updatedAt: new Date(),
+        },
+      },
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).send({
+        message: "Vendor not found",
+      });
+    }
+
+    res.send({
+      success: true,
+      message: "Profile updated successfully",
+    });
+  } catch (error) {
+    console.error("Failed to update vendor profile:", error);
+
+    res.status(500).send({
+      message: "Failed to update vendor profile",
+    });
+  }
+});
 
 app.listen(PORT, () => {
   console.log(`PizzaHub server running on port ${PORT}`);
