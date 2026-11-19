@@ -128,7 +128,41 @@ app.delete("/menu/:id", async (req, res) => {
   }
 });
 
+// Update menu item
+app.patch("/menu/:id", async (req, res) => {
+  try {
+    const id = req.params.id;
+    const updatedItem = req.body;
 
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).send({
+        message: "Invalid menu item ID",
+      });
+    }
+
+    const result = await menuCollection.updateOne(
+      { _id: new ObjectId(id) },
+      {
+        $set: updatedItem,
+      }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).send({
+        message: "Menu item not found",
+      });
+    }
+
+    res.status(200).send({
+      message: "Menu item updated successfully",
+    });
+  } catch (error) {
+    console.error("Failed to update menu item:", error);
+    res.status(500).send({
+      message: "Failed to update menu item",
+    });
+  }
+});
 
 
 app.listen(PORT, () => {
