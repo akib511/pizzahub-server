@@ -192,7 +192,6 @@ app.patch("/menu/:id", async (req, res) => {
 });
 
 
-// Update menu item availability (eye)
 
 // Update menu item availability (eye)
 app.patch("/menu/:id/availability", async (req, res) => {
@@ -276,7 +275,6 @@ app.patch("/menu/:id/availability", async (req, res) => {
 
 
 //admin releted API
-
 // Admin approve or reject menu item
 app.patch("/admin/menu/:id/status", async (req, res) => {
   try {
@@ -311,15 +309,56 @@ app.patch("/admin/menu/:id/status", async (req, res) => {
       });
     }
 
+    let available = false;
+    let limitReached = false;
+
+    if (status === "approved") {
+      const vendor = await usersCollection.findOne({
+        email: item.vendorEmail,
+      });
+
+      if (!vendor) {
+        return res.status(404).send({
+          message: "Vendor not found",
+        });
+      }
+
+      const isPremium =
+        vendor.subscriptionPlan === "premium" &&
+        vendor.subscriptionExpiresAt &&
+        new Date(vendor.subscriptionExpiresAt) > new Date();
+
+      const activeItems = await menuCollection.countDocuments({
+        vendorEmail: item.vendorEmail,
+        status: "approved",
+        available: true,
+      });
+
+      if (item.available !== false) {
+        if (isPremium || activeItems < 3) {
+          available = true;
+        } else {
+          limitReached = true;
+        }
+      }
+    }
+
     await menuCollection.updateOne(
       { _id: new ObjectId(id) },
       {
-        $set: { status },
+        $set: {
+          status,
+          available,
+        },
       }
     );
 
     res.status(200).send({
-      message: `Menu item ${status} successfully`,
+      message: limitReached
+        ? "Menu approved, but vendor reached the Free Plan limit. This item remains inactive."
+        : `Menu item ${status} successfully`,
+      available,
+      limitReached,
     });
   } catch (error) {
     console.error("Failed to review menu item:", error);
@@ -329,7 +368,6 @@ app.patch("/admin/menu/:id/status", async (req, res) => {
     });
   }
 });
-
 
 app.listen(PORT, () => {
   console.log(`PizzaHub server running on port ${PORT}`);
