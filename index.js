@@ -7,6 +7,7 @@ const app = express();
 let menuCollection;
 let usersCollection;
 let ordersCollection;
+let notificationsCollection;
 const PORT = process.env.PORT || 5000;
 
 // Middleware
@@ -26,6 +27,7 @@ export async function connectToMongoDB() {
     menuCollection = db.collection("menuItems");
     ordersCollection = db.collection("orders");
     const transactionsCollection = db.collection("transactions");
+    notificationsCollection = db.collection("notifications");
     usersCollection = db.collection("user");
 
     console.log("MongoDB Connected Successfully!");
@@ -104,6 +106,36 @@ app.post("/menu", async (req, res) => {
     };
 
     const result = await menuCollection.insertOne(menuItem);
+
+    // Create notification for admins
+    try {
+      const admins = await usersCollection
+        .find(
+          { role: "admin" },
+          { projection: { email: 1, notificationPreferences: 1 } },
+        )
+        .toArray();
+
+      const adminNotifications = admins
+        .filter(
+          (admin) => admin.notificationPreferences?.menuApprovals !== false,
+        )
+        .map((admin) => ({
+          recipientEmail: admin.email,
+          title: "New Menu Approval Request",
+          message: `${vendor.name} submitted "${menuItem.name}" for approval.`,
+          type: "menu_approval",
+          relatedId: result.insertedId,
+          isRead: false,
+          createdAt: new Date(),
+        }));
+
+      if (adminNotifications.length > 0) {
+        await notificationsCollection.insertMany(adminNotifications);
+      }
+    } catch (notificationError) {
+      console.error("Failed to create menu notification:", notificationError);
+    }
 
     res.status(201).send({
       message: "Menu item submitted successfully. Waiting for admin approval.",
@@ -567,6 +599,41 @@ app.post("/orders", async (req, res) => {
 
     const result = await ordersCollection.insertOne(order);
 
+    // Create notification for admins
+try {
+  const admins = await usersCollection
+    .find(
+      { role: "admin" },
+      {
+        projection: {
+          email: 1,
+          notificationPreferences: 1,
+        },
+      },
+    )
+    .toArray();
+
+  const adminNotifications = admins
+    .filter(
+      (admin) => admin.notificationPreferences?.newOrders !== false,
+    )
+    .map((admin) => ({
+      recipientEmail: admin.email,
+      title: "New Order Received",
+      message: `${customer.name} placed a new order for ${item.name}.`,
+      type: "new_order",
+      relatedId: result.insertedId,
+      isRead: false,
+      createdAt: new Date(),
+    }));
+
+  if (adminNotifications.length > 0) {
+    await notificationsCollection.insertMany(adminNotifications);
+  }
+} catch (notificationError) {
+  console.error("Failed to create order notification:", notificationError);
+}
+
     res.status(201).send({
       message: "Order placed successfully",
       insertedId: result.insertedId,
@@ -860,6 +927,159 @@ app.get("/admin/platform-stats", async (req, res) => {
 
     res.status(500).send({
       message: "Failed to fetch platform statistics",
+    });
+  }
+});
+
+
+// Get Admin Notifications
+app.get("/admin/notifications/:email", async (req, res) => {
+  try {
+    const { email } = req.params;
+
+    const notifications = await notificationsCollection
+      .find({ recipientEmail: email })
+      .sort({ createdAt: -1 })
+      .limit(50)
+      .toArray();
+
+    const unreadCount = await notificationsCollection.countDocuments({
+      recipientEmail: email,
+      isRead: false,
+    });
+
+    res.send({
+      notifications,
+      unreadCount,
+    });
+  } catch (error) {
+    console.error("Failed to fetch notifications:", error);
+
+    res.status(500).send({
+      message: "Failed to fetch notifications",
+    });
+  }
+});
+
+
+// Mark Admin Notification as Read
+app.patch("/admin/notifications/:id/read/:email", async (req, res) => {
+  try {
+    const { id, email } = req.params;
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).send({
+        message: "Invalid notification ID",
+      });
+    }
+
+    const result = await notificationsCollection.updateOne(
+      {
+        _id: new ObjectId(id),
+        recipientEmail: email,
+      },
+      {
+        $set: {
+          isRead: true,
+        },
+      },
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).send({
+        message: "Notification not found",
+      });
+    }
+
+    res.send({
+      success: true,
+      message: "Notification marked as read",
+    });
+  } catch (error) {
+    console.error("Failed to mark notification as read:", error);
+
+    res.status(500).send({
+      message: "Failed to update notification",
+    });
+  }
+});
+
+
+// Mark Admin Notification as Unread
+app.patch("/admin/notifications/:id/unread/:email", async (req, res) => {
+  try {
+    const { id, email } = req.params;
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).send({
+        message: "Invalid notification ID",
+      });
+    }
+
+    const result = await notificationsCollection.updateOne(
+      {
+        _id: new ObjectId(id),
+        recipientEmail: email,
+      },
+      {
+        $set: {
+          isRead: false,
+        },
+      },
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).send({
+        message: "Notification not found",
+      });
+    }
+
+    res.send({
+      success: true,
+      message: "Notification marked as unread",
+    });
+  } catch (error) {
+    console.error("Failed to mark notification as unread:", error);
+
+    res.status(500).send({
+      message: "Failed to update notification",
+    });
+  }
+});
+
+
+
+// Delete Admin Notification
+app.delete("/admin/notifications/:id/:email", async (req, res) => {
+  try {
+    const { id, email } = req.params;
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).send({
+        message: "Invalid notification ID",
+      });
+    }
+
+    const result = await notificationsCollection.deleteOne({
+      _id: new ObjectId(id),
+      recipientEmail: email,
+    });
+
+    if (result.deletedCount === 0) {
+      return res.status(404).send({
+        message: "Notification not found",
+      });
+    }
+
+    res.send({
+      success: true,
+      message: "Notification deleted successfully",
+    });
+  } catch (error) {
+    console.error("Failed to delete notification:", error);
+
+    res.status(500).send({
+      message: "Failed to delete notification",
     });
   }
 });
