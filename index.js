@@ -269,6 +269,8 @@ app.patch("/menu/:id/availability", async (req, res) => {
 });
 
 //admin releted API
+
+
 // Admin approve or reject menu item
 app.patch("/admin/menu/:id/status", async (req, res) => {
   try {
@@ -359,6 +361,104 @@ app.patch("/admin/menu/:id/status", async (req, res) => {
 
     res.status(500).send({
       message: "Failed to update menu item status",
+    });
+  }
+});
+
+
+// Admin Notification Preferences API
+
+// Get Admin Notification Preferences
+app.get("/admin/preferences/:email", async (req, res) => {
+  try {
+    const { email } = req.params;
+
+    const admin = await usersCollection.findOne(
+      { email, role: "admin" },
+      {
+        projection: {
+          notificationPreferences: 1,
+        },
+      },
+    );
+
+    if (!admin) {
+      return res.status(404).send({
+        message: "Admin not found",
+      });
+    }
+
+    const preferences = {
+      newOrders: true,
+      vendorApplications: true,
+      menuApprovals: true,
+      transactions: false,
+      ...admin.notificationPreferences,
+    };
+
+    res.send(preferences);
+  } catch (error) {
+    console.error("Failed to fetch notification preferences:", error);
+
+    res.status(500).send({
+      message: "Failed to fetch notification preferences",
+    });
+  }
+});
+
+// Update Admin Notification Preferences
+app.patch("/admin/preferences/:email", async (req, res) => {
+  try {
+    const { email } = req.params;
+    const { newOrders, vendorApplications, menuApprovals, transactions } =
+      req.body;
+
+    const updates = {};
+
+    const allowedPreferences = [
+      "newOrders",
+      "vendorApplications",
+      "menuApprovals",
+      "transactions",
+    ];
+
+    for (const key of allowedPreferences) {
+      if (typeof req.body[key] === "boolean") {
+        updates[`notificationPreferences.${key}`] = req.body[key];
+      }
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).send({
+        message: "No valid notification preferences provided",
+      });
+    }
+
+    const result = await usersCollection.updateOne(
+      { email, role: "admin" },
+      {
+        $set: {
+          ...updates,
+          updatedAt: new Date(),
+        },
+      },
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).send({
+        message: "Admin not found",
+      });
+    }
+
+    res.send({
+      success: true,
+      message: "Notification preferences updated successfully",
+    });
+  } catch (error) {
+    console.error("Failed to update notification preferences:", error);
+
+    res.status(500).send({
+      message: "Failed to update notification preferences",
     });
   }
 });
@@ -664,6 +764,8 @@ app.get("/vendor/profile/:email", async (req, res) => {
           description: 1,
           profileImage: 1,
           restaurantLogo: 1,
+          subscriptionPlan: 1,
+          subscriptionExpiresAt: 1,
         },
       },
     );
