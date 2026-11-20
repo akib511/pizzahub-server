@@ -842,6 +842,29 @@ app.patch("/vendor/profile/:email", async (req, res) => {
   }
 });
 
+
+// Admin Platform Statistics API
+app.get("/admin/platform-stats", async (req, res) => {
+  try {
+    const [totalVendors, totalOrders] = await Promise.all([
+      usersCollection.countDocuments({ role: "vendor" }),
+      ordersCollection.countDocuments(),
+    ]);
+
+    res.send({
+      totalVendors,
+      totalOrders,
+    });
+  } catch (error) {
+    console.error("Failed to fetch platform statistics:", error);
+
+    res.status(500).send({
+      message: "Failed to fetch platform statistics",
+    });
+  }
+});
+
+
 app.listen(PORT, () => {
   console.log(`PizzaHub server running on port ${PORT}`);
 });
