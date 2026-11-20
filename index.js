@@ -458,6 +458,78 @@ app.get("/admin/users", async (req, res) => {
 });
 
 
+// Get All Vendors for Admin
+app.get("/admin/vendors", async (req, res) => {
+  try {
+    const vendors = await usersCollection
+      .find(
+        { role: "vendor" },
+        {
+          projection: {
+            name: 1,
+            email: 1,
+            image: 1,
+            profileImage: 1,
+            restaurantName: 1,
+            phone: 1,
+            createdAt: 1,
+            subscriptionPlan: 1,
+            subscriptionExpiresAt: 1,
+          },
+        },
+      )
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    const menuCounts = await menuCollection
+      .aggregate([
+        {
+          $group: {
+            _id: "$vendorEmail",
+            totalMenuItems: { $sum: 1 },
+          },
+        },
+      ])
+      .toArray();
+
+    const orderCounts = await ordersCollection
+      .aggregate([
+        {
+          $group: {
+            _id: "$vendorEmail",
+            totalOrders: { $sum: 1 },
+          },
+        },
+      ])
+      .toArray();
+
+    const vendorsWithStats = vendors.map((vendor) => {
+      const menuInfo = menuCounts.find(
+        (item) => item._id === vendor.email,
+      );
+
+      const orderInfo = orderCounts.find(
+        (item) => item._id === vendor.email,
+      );
+
+      return {
+        ...vendor,
+        menuItems: menuInfo?.totalMenuItems || 0,
+        orders: orderInfo?.totalOrders || 0,
+      };
+    });
+
+    res.send(vendorsWithStats);
+  } catch (error) {
+    console.error("Failed to fetch admin vendors:", error);
+
+    res.status(500).send({
+      message: "Failed to fetch vendors",
+    });
+  }
+});
+
+
 // Get Admin Notification Preferences
 app.get("/admin/preferences/:email", async (req, res) => {
   try {
