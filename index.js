@@ -300,6 +300,90 @@ app.patch("/menu/:id/availability", async (req, res) => {
   }
 });
 
+
+// Get Customer Favorites
+app.get("/customer/favorites/:email", async (req, res) => {
+  try {
+    const { email } = req.params;
+
+    const customer = await usersCollection.findOne(
+      { email, role: "customer" },
+      { projection: { favoriteItems: 1 } },
+    );
+
+    if (!customer) {
+      return res.status(404).send({
+        message: "Customer not found",
+      });
+    }
+
+    const favoriteIds = (customer.favoriteItems || []).filter((id) =>
+      ObjectId.isValid(id),
+    ).map((id) => new ObjectId(id));
+
+    const favorites = await menuCollection
+      .find({
+        _id: { $in: favoriteIds },
+        status: "approved",
+        available: true,
+      })
+      .toArray();
+
+    res.send(favorites);
+  } catch (error) {
+    console.error("Failed to fetch favorites:", error);
+    res.status(500).send({ message: "Failed to fetch favorites" });
+  }
+});
+
+// Add Customer Favorite
+app.post("/customer/favorites/:email/:itemId", async (req, res) => {
+  try {
+    const { email, itemId } = req.params;
+
+    if (!ObjectId.isValid(itemId)) {
+      return res.status(400).send({ message: "Invalid menu item ID" });
+    }
+
+    const result = await usersCollection.updateOne(
+      { email, role: "customer" },
+      { $addToSet: { favoriteItems: new ObjectId(itemId) } },
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).send({ message: "Customer not found" });
+    }
+
+    res.send({ success: true, message: "Added to favorites" });
+  } catch (error) {
+    console.error("Failed to add favorite:", error);
+    res.status(500).send({ message: "Failed to add favorite" });
+  }
+});
+
+
+// Remove Customer Favorite
+app.delete("/customer/favorites/:email/:itemId", async (req, res) => {
+  try {
+    const { email, itemId } = req.params;
+
+    if (!ObjectId.isValid(itemId)) {
+      return res.status(400).send({ message: "Invalid menu item ID" });
+    }
+
+    await usersCollection.updateOne(
+      { email, role: "customer" },
+      { $pull: { favoriteItems: new ObjectId(itemId) } },
+    );
+
+    res.send({ success: true, message: "Removed from favorites" });
+  } catch (error) {
+    console.error("Failed to remove favorite:", error);
+    res.status(500).send({ message: "Failed to remove favorite" });
+  }
+});
+
+
 //admin releted API
 
 
@@ -470,6 +554,7 @@ app.get("/admin/vendors", async (req, res) => {
             email: 1,
             image: 1,
             profileImage: 1,
+            restaurantLogo: 1,
             restaurantName: 1,
             phone: 1,
             createdAt: 1,
@@ -1004,19 +1089,28 @@ app.patch("/vendor/profile/:email", async (req, res) => {
       });
     }
 
+    const updateData = {
+      name,
+      phone,
+      restaurantName,
+      location,
+      description: description || "",
+      updatedAt: new Date(),
+    };
+
+    // Update images only when fields are provided
+    if (Object.hasOwn(req.body, "profileImage")) {
+      updateData.profileImage = profileImage;
+    }
+
+    if (Object.hasOwn(req.body, "restaurantLogo")) {
+      updateData.restaurantLogo = restaurantLogo;
+    }
+
     const result = await usersCollection.updateOne(
       { email, role: "vendor" },
       {
-        $set: {
-          name,
-          phone,
-          restaurantName,
-          location,
-          description: description || "",
-          profileImage,
-          restaurantLogo,
-          updatedAt: new Date(),
-        },
+        $set: updateData,
       },
     );
 
