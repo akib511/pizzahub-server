@@ -1242,6 +1242,26 @@ app.delete("/admin/notifications/:id/:email", async (req, res) => {
 });
 
 
+// Get all orders for Admin
+app.get("/admin/orders", async (req, res) => {
+  try {
+    const orders = await ordersCollection
+      .find({})
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    res.send(orders);
+  } catch (error) {
+    console.error("Failed to fetch admin orders:", error);
+
+    res.status(500).send({
+      message: "Failed to fetch orders",
+    });
+  }
+});
+
+
+
 app.listen(PORT, () => {
   console.log(`PizzaHub server running on port ${PORT}`);
 });
