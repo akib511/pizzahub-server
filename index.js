@@ -932,6 +932,163 @@ app.get("/admin/platform-stats", async (req, res) => {
 });
 
 
+// Admin Dashboard API
+app.get("/admin/dashboard", async (req, res) => {
+  try {
+    const currentDate = new Date();
+
+    const sixMonthsAgo = new Date(
+      currentDate.getFullYear(),
+      currentDate.getMonth() - 5,
+      1,
+    );
+
+    const [
+      totalUsers,
+      totalVendors,
+      totalOrders,
+      pendingMenuApprovals,
+      pendingOrders,
+      premiumVendors,
+      recentOrders,
+      vendorPerformance,
+      monthlyOrderValues,
+    ] = await Promise.all([
+      // Total Customers
+      usersCollection.countDocuments(),
+
+      // Total Vendors
+      usersCollection.countDocuments({ role: "vendor" }),
+
+      // Total Orders
+      ordersCollection.countDocuments(),
+
+      // Pending Menu Approvals
+      menuCollection.countDocuments({ status: "pending" }),
+
+      // Pending Orders
+      ordersCollection.countDocuments({ status: "pending" }),
+
+      // Active Premium Vendors
+      usersCollection.countDocuments({
+        role: "vendor",
+        subscriptionPlan: "premium",
+        subscriptionExpiresAt: { $gt: currentDate },
+      }),
+
+      // Recent Orders
+      ordersCollection
+        .find()
+        .sort({ createdAt: -1 })
+        .limit(5)
+        .toArray(),
+
+      // Top Vendor Performance
+      ordersCollection
+        .aggregate([
+          {
+            $group: {
+              _id: "$vendorEmail",
+              totalOrders: { $sum: 1 },
+              totalOrderValue: { $sum: "$totalPrice" },
+            },
+          },
+          {
+            $sort: { totalOrders: -1 },
+          },
+          {
+            $limit: 5,
+          },
+        ])
+        .toArray(),
+
+      // Monthly Order Values (Last 6 Months)
+      ordersCollection
+        .aggregate([
+          {
+            $match: {
+              createdAt: { $gte: sixMonthsAgo },
+              status: { $ne: "cancelled" },
+            },
+          },
+          {
+            $group: {
+              _id: {
+                year: { $year: "$createdAt" },
+                month: { $month: "$createdAt" },
+              },
+              totalOrderValue: { $sum: "$totalPrice" },
+              totalOrders: { $sum: 1 },
+            },
+          },
+          {
+            $sort: {
+              "_id.year": 1,
+              "_id.month": 1,
+            },
+          },
+        ])
+        .toArray(),
+    ]);
+
+    // Get Vendor Information
+    const topVendors = await Promise.all(
+      vendorPerformance.map(async (vendor) => {
+        const vendorInfo = await usersCollection.findOne(
+          { email: vendor._id },
+          {
+            projection: {
+              name: 1,
+              restaurantName: 1,
+              email: 1,
+            },
+          },
+        );
+
+        return {
+          email: vendor._id,
+          name: vendorInfo?.restaurantName || vendorInfo?.name || "Unknown",
+          totalOrders: vendor.totalOrders,
+          totalOrderValue: vendor.totalOrderValue,
+        };
+      }),
+    );
+
+    // Format Monthly Data
+    const monthlyRevenue = monthlyOrderValues.map((item) => ({
+      month: new Date(
+        item._id.year,
+        item._id.month - 1,
+      ).toLocaleString("en-US", { month: "short" }),
+      year: item._id.year,
+      totalOrderValue: item.totalOrderValue,
+      totalOrders: item.totalOrders,
+    }));
+
+    res.status(200).send({
+      statistics: {
+        totalUsers,
+        totalVendors,
+        totalOrders,
+        pendingMenuApprovals,
+        pendingOrders,
+        premiumVendors,
+      },
+      recentOrders,
+      topVendors,
+      monthlyRevenue,
+    });
+  } catch (error) {
+    console.error("Failed to fetch admin dashboard:", error);
+
+    res.status(500).send({
+      message: "Failed to fetch admin dashboard data",
+    });
+  }
+});
+
+
+
 // Get Admin Notifications
 app.get("/admin/notifications/:email", async (req, res) => {
   try {
