@@ -400,6 +400,64 @@ app.patch("/admin/menu/:id/status", async (req, res) => {
 
 // Admin Notification Preferences API
 
+
+// Get All Users for Admin
+app.get("/admin/users", async (req, res) => {
+  try {
+    const users = await usersCollection
+      .find(
+        {},
+        {
+          projection: {
+            name: 1,
+            email: 1,
+            role: 1,
+            image: 1,
+            profileImage: 1,
+            restaurantName: 1,
+            phone: 1,
+            createdAt: 1,
+            subscriptionPlan: 1,
+            subscriptionExpiresAt: 1,
+          },
+        },
+      )
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    const orderCounts = await ordersCollection
+      .aggregate([
+        {
+          $group: {
+            _id: "$customerEmail",
+            totalOrders: { $sum: 1 },
+          },
+        },
+      ])
+      .toArray();
+
+    const usersWithOrders = users.map((user) => {
+      const orderInfo = orderCounts.find(
+        (order) => order._id === user.email,
+      );
+
+      return {
+        ...user,
+        orders: orderInfo?.totalOrders || 0,
+      };
+    });
+
+    res.send(usersWithOrders);
+  } catch (error) {
+    console.error("Failed to fetch admin users:", error);
+
+    res.status(500).send({
+      message: "Failed to fetch users",
+    });
+  }
+});
+
+
 // Get Admin Notification Preferences
 app.get("/admin/preferences/:email", async (req, res) => {
   try {
