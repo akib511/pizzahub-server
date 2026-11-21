@@ -1606,6 +1606,50 @@ app.get("/admin/orders", async (req, res) => {
 
 
 
+// Get All Transactions for Admin
+app.get("/admin/transactions", async (req, res) => {
+  try {
+    const transactions = await transactionsCollection
+      .find({})
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    const transactionsWithVendor = await Promise.all(
+      transactions.map(async (transaction) => {
+        const vendor = await usersCollection.findOne(
+          {
+            email: transaction.vendorEmail,
+            role: "vendor",
+          },
+          {
+            projection: {
+              name: 1,
+              restaurantName: 1,
+              email: 1,
+            },
+          },
+        );
+
+        return {
+          ...transaction,
+          vendorName:
+            vendor?.restaurantName || vendor?.name || "Unknown Vendor",
+          vendorEmail: transaction.vendorEmail,
+        };
+      }),
+    );
+
+    res.status(200).send(transactionsWithVendor);
+  } catch (error) {
+    console.error("Failed to fetch transactions:", error);
+
+    res.status(500).send({
+      message: "Failed to fetch transactions",
+    });
+  }
+});
+
+
 app.listen(PORT, () => {
   console.log(`PizzaHub server running on port ${PORT}`);
 });
