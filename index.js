@@ -3,15 +3,139 @@ import "dotenv/config";
 import express from "express";
 import cors from "cors";
 
+import Stripe from "stripe";
+
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+
 const app = express();
 let menuCollection;
 let usersCollection;
 let ordersCollection;
 let notificationsCollection;
+let transactionsCollection;
 const PORT = process.env.PORT || 5000;
 
 // Middleware
 app.use(cors());
+
+// Stripe Webhook
+app.post(
+  "/payments/webhook",
+  express.raw({ type: "application/json" }),
+  async (req, res) => {
+    const signature = req.headers["stripe-signature"];
+
+    let event;
+
+    try {
+      event = stripe.webhooks.constructEvent(
+        req.body,
+        signature,
+        process.env.STRIPE_WEBHOOK_SECRET
+      );
+    } catch (error) {
+      console.error("Webhook signature verification failed:", error.message);
+
+      return res.status(400).send(`Webhook Error: ${error.message}`);
+    }
+
+    try {
+      if (
+        event.type === "checkout.session.completed" ||
+        event.type === "checkout.session.async_payment_succeeded"
+      ) {
+        const session = event.data.object;
+
+        // Verify payment
+        if (
+          session.payment_status !== "paid" ||
+          session.mode !== "payment"
+        ) {
+          return res.status(200).send({ received: true });
+        }
+
+        const vendorEmail = session.metadata?.vendorEmail;
+
+        // Verify Premium plan information
+        if (
+          !vendorEmail ||
+          session.metadata?.plan !== "premium" ||
+          session.amount_total !== 1999 ||
+          session.currency !== "usd"
+        ) {
+          console.log("Invalid Premium payment information");
+          return res.status(200).send({ received: true });
+        }
+
+        // Verify purchased Price ID
+        const lineItems = await stripe.checkout.sessions.listLineItems(
+          session.id
+        );
+
+        const isCorrectPrice = lineItems.data.some(
+          (item) =>
+            item.price?.id === "price_1UeBWfA3jFSCMLqEUNSiv0Xq"
+        );
+
+        if (!isCorrectPrice) {
+          console.log("Incorrect Premium Price ID");
+          return res.status(200).send({ received: true });
+        }
+
+        // Find vendor
+        const vendor = await usersCollection.findOne({
+          email: vendorEmail,
+          role: "vendor",
+        });
+
+        if (!vendor) {
+          console.log("Vendor not found:", vendorEmail);
+          return res.status(200).send({ received: true });
+        }
+
+        // Save transaction only once
+        await transactionsCollection.updateOne(
+          { sessionId: session.id },
+          {
+            $setOnInsert: {
+              sessionId: session.id,
+              vendorEmail,
+              amount: session.amount_total / 100,
+              currency: session.currency,
+              paymentStatus: "paid",
+              plan: "premium",
+              createdAt: new Date(),
+            },
+          },
+          { upsert: true }
+        );
+
+        // Activate Premium
+        await usersCollection.updateOne(
+          { email: vendorEmail, role: "vendor" },
+          {
+            $set: {
+              subscriptionPlan: "premium",
+              subscriptionPurchasedAt: new Date(),
+            },
+          }
+        );
+
+        console.log("Premium activated for:", vendorEmail);
+      }
+
+      return res.status(200).send({ received: true });
+    } catch (error) {
+      console.error("Webhook processing error:", error);
+
+      return res.status(500).send({
+        message: "Webhook processing failed",
+      });
+    }
+  }
+);
+
+//middleware
 app.use(express.json());
 
 const client = new MongoClient(
@@ -26,7 +150,7 @@ export async function connectToMongoDB() {
 
     menuCollection = db.collection("menuItems");
     ordersCollection = db.collection("orders");
-    const transactionsCollection = db.collection("transactions");
+    transactionsCollection = db.collection("transactions");
     notificationsCollection = db.collection("notifications");
     usersCollection = db.collection("user");
 
@@ -259,10 +383,7 @@ app.patch("/menu/:id/availability", async (req, res) => {
         });
       }
 
-      const isPremium =
-        vendor.subscriptionPlan === "premium" &&
-        vendor.subscriptionExpiresAt &&
-        new Date(vendor.subscriptionExpiresAt) > new Date();
+  const isPremium = vendor.subscriptionPlan === "premium";
 
       if (!isPremium) {
         const activeItems = await menuCollection.countDocuments({
@@ -1194,11 +1315,10 @@ app.get("/admin/dashboard", async (req, res) => {
       ordersCollection.countDocuments({ status: "pending" }),
 
       // Active Premium Vendors
-      usersCollection.countDocuments({
-        role: "vendor",
-        subscriptionPlan: "premium",
-        subscriptionExpiresAt: { $gt: currentDate },
-      }),
+   usersCollection.countDocuments({
+  role: "vendor",
+  subscriptionPlan: "premium",
+}),
 
       // Recent Orders
       ordersCollection
