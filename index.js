@@ -424,6 +424,52 @@ app.post(
 
       const result = await menuCollection.insertOne(newItem);
 
+
+
+// Create notification for admins
+try {
+  const vendor = await usersCollection.findOne({
+    email: req.user.email,
+  });
+
+  const admins = await usersCollection
+    .find(
+      { role: "admin" },
+      {
+        projection: {
+          email: 1,
+          notificationPreferences: 1,
+        },
+      }
+    )
+    .toArray();
+
+  const adminNotifications = admins
+    .filter(
+      (admin) =>
+        admin.notificationPreferences?.menuApprovals !== false
+    )
+    .map((admin) => ({
+      recipientEmail: admin.email,
+      title: "New Menu Approval Request",
+      message: `${vendor?.name || req.user.email} submitted "${newItem.name}" for approval.`,
+      type: "menu_approval",
+      relatedId: result.insertedId,
+      isRead: false,
+      createdAt: new Date(),
+    }));
+
+  if (adminNotifications.length > 0) {
+    await notificationsCollection.insertMany(adminNotifications);
+  }
+} catch (notificationError) {
+  console.error(
+    "Failed to create menu notification:",
+    notificationError
+  );
+}
+
+
       res.status(201).send(result);
     } catch (error) {
       console.error(error);
@@ -838,36 +884,39 @@ app.patch("/admin/menu/:id/status", verifyToken , requireRole("admin"), async (r
       });
     }
 
-    let available = false;
-    let limitReached = false;
+    
+let available = false;
+let limitReached = false;
 
-    if (status === "approved") {
-      const vendor = await usersCollection.findOne({
-        email: item.vendorEmail,
-      });
+if (status === "approved") {
+  const vendor = await usersCollection.findOne({
+    email: item.vendorEmail,
+    role: "vendor",
+  });
 
-      if (!vendor) {
-        return res.status(404).send({
-          message: "Vendor not found",
-        });
-      }
+  if (!vendor) {
+    return res.status(404).send({
+      message: "Vendor not found",
+    });
+  }
 
-      const isPremium = vendor.subscriptionPlan === "premium";
+  const isPremium = vendor.subscriptionPlan === "premium";
 
-      const activeItems = await menuCollection.countDocuments({
-        vendorEmail: item.vendorEmail,
-        status: "approved",
-        available: true,
-      });
+  const activeItems = await menuCollection.countDocuments({
+    vendorEmail: item.vendorEmail,
+    status: "approved",
+    available: true,
+  });
 
-      if (item.available !== false) {
-        if (isPremium || activeItems < 3) {
-          available = true;
-        } else {
-          limitReached = true;
-        }
-      }
-    }
+  if (isPremium) {
+    available = true;
+  } else if (activeItems < 3) {
+    available = true;
+  } else {
+    limitReached = true;
+  }
+}
+
 
     await menuCollection.updateOne(
       { _id: new ObjectId(id) },
