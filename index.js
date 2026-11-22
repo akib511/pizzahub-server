@@ -47,6 +47,74 @@ let ordersCollection;
 let notificationsCollection;
 let transactionsCollection;
 
+// MongoDB Connection
+const client = new MongoClient(process.env.MONGODB_URI, {
+  serverSelectionTimeoutMS: 10000,
+  connectTimeoutMS: 10000,
+});
+
+export async function connectToMongoDB() {
+  try {
+    await client.connect();
+
+    const db = client.db("PizzaHub");
+
+    menuCollection = db.collection("menuItems");
+    usersCollection = db.collection("user");
+    ordersCollection = db.collection("orders");
+    transactionsCollection = db.collection("transactions");
+    notificationsCollection = db.collection("notifications");
+
+    console.log("MongoDB Connected Successfully!");
+    console.log("Database: PizzaHub");
+
+    return {
+      client,
+      db,
+      menuCollection,
+      usersCollection,
+      ordersCollection,
+      transactionsCollection,
+    };
+  } catch (error) {
+    console.error("MongoDB Connection Failed:", error);
+    throw error;
+  }
+}
+
+
+let dbReadyPromise;
+
+export async function ensureDbReady() {
+  if (!dbReadyPromise) {
+    dbReadyPromise = (async () => {
+      let lastError;
+
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          await connectToMongoDB();
+          return;
+        } catch (error) {
+          lastError = error;
+          if (attempt === 0) {
+            await new Promise((resolve) => setTimeout(resolve, 500));
+          }
+        }
+      }
+
+      throw lastError;
+    })().catch((error) => {
+      dbReadyPromise = undefined;
+      throw error;
+    });
+
+    // Prevent an unhandled rejection if no request arrives before failure.
+    dbReadyPromise.catch(() => {});
+  }
+
+  return dbReadyPromise;
+}
+
 // JWT Verification Middleware
 const verifyToken = async (req, res, next) => {
   try {
@@ -109,6 +177,20 @@ const requireRole = (...roles) => {
 
 // CORS
 app.use(cors());
+
+// Database readiness gate (must be registered before all routes)
+app.use(async (req, res, next) => {
+  try {
+    await ensureDbReady();
+    next();
+  } catch (error) {
+    console.error("Database not ready:", error.message);
+
+    return res.status(503).send({
+      message: "Database not ready",
+    });
+  }
+});
 
 // Premium Price ID
 const PREMIUM_PRICE_ID = "price_1UeBWfA3jFSCMLqEUNSiv0Xq";
@@ -322,40 +404,6 @@ app.get(
 
 // JSON Middleware
 app.use(express.json());
-
-// MongoDB Connection
-const client = new MongoClient(
-  process.env.MONGODB_URI
-);
-
-export async function connectToMongoDB() {
-  try {
-    await client.connect();
-
-    const db = client.db("PizzaHub");
-
-    menuCollection = db.collection("menuItems");
-    usersCollection = db.collection("user");
-    ordersCollection = db.collection("orders");
-    transactionsCollection = db.collection("transactions");
-    notificationsCollection = db.collection("notifications");
-
-    console.log("MongoDB Connected Successfully!");
-    console.log("Database: PizzaHub");
-
-    return {
-      client,
-      db,
-      menuCollection,
-      usersCollection,
-      ordersCollection,
-      transactionsCollection,
-    };
-  } catch (error) {
-    console.error("MongoDB Connection Failed:", error);
-    throw error;
-  }
-}
 
 // Test Route
 app.get("/", (req, res) => {
@@ -1000,6 +1048,126 @@ app.get("/admin/users", verifyToken, requireRole("admin"), async (req, res) => {
     });
   }
 });
+
+// Update a user's role (Admin only)
+app.patch(
+  "/admin/users/:id/role",
+  verifyToken,
+  requireRole("admin"),
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+      const requestedRole =
+        typeof req.body?.role === "string"
+          ? req.body.role.trim().toLowerCase()
+          : "";
+
+      const allowedRoles = ["customer", "vendor", "admin"];
+
+      if (!ObjectId.isValid(id)) {
+        return res.status(400).send({
+          message: "Invalid user ID",
+        });
+      }
+
+      if (!allowedRoles.includes(requestedRole)) {
+        return res.status(400).send({
+          message: "Invalid role",
+        });
+      }
+
+      const targetId = new ObjectId(id);
+      const targetUser = await usersCollection.findOne({ _id: targetId });
+
+      if (!targetUser) {
+        return res.status(404).send({
+          message: "User not found",
+        });
+      }
+
+      // The acting admin comes from the verified JWT/DB lookup, never the request body.
+      if (
+        targetId.equals(req.user.id) ||
+        targetUser.email === req.user.email
+      ) {
+        return res.status(403).send({
+          message: "You cannot change your own role",
+        });
+      }
+
+      const currentRole =
+        typeof targetUser.role === "string"
+          ? targetUser.role.toLowerCase()
+          : "customer";
+
+      if (currentRole === requestedRole) {
+        return res.status(400).send({
+          message: "User already has this role",
+        });
+      }
+
+      // Keep at least one admin in the system.
+      if (currentRole === "admin" && requestedRole !== "admin") {
+        const adminCount = await usersCollection.countDocuments({
+          role: "admin",
+        });
+
+        if (adminCount <= 1) {
+          return res.status(403).send({
+            message: "The last admin cannot be demoted",
+          });
+        }
+      }
+
+      const result = await usersCollection.updateOne(
+        { _id: targetId },
+        {
+          $set: {
+            role: requestedRole,
+            updatedAt: new Date(),
+          },
+        },
+      );
+
+      if (result.matchedCount === 0) {
+        return res.status(404).send({
+          message: "User not found",
+        });
+      }
+
+      const updatedUser = await usersCollection.findOne(
+        { _id: targetId },
+        {
+          projection: {
+            name: 1,
+            email: 1,
+            role: 1,
+            image: 1,
+            profileImage: 1,
+            restaurantName: 1,
+            phone: 1,
+            createdAt: 1,
+            subscriptionPlan: 1,
+            subscriptionExpiresAt: 1,
+            subscriptionPurchasedAt: 1,
+          },
+        },
+      );
+
+      res.send({
+        success: true,
+        message: `Role updated to ${requestedRole} successfully`,
+        user: updatedUser,
+      });
+    } catch (error) {
+      console.error("Failed to update user role:", error);
+
+      res.status(500).send({
+        message: "Failed to update user role",
+      });
+    }
+  },
+);
 
 // Get All Vendors for Admin
 app.get("/admin/vendors",verifyToken,requireRole("admin"),async (req, res) => {
@@ -2000,7 +2168,7 @@ app.get("/admin/orders", verifyToken , requireRole("admin"), async (req, res) =>
 // Connect to MongoDB first, then start the server
 async function startServer() {
   try {
-    await connectToMongoDB();
+    await ensureDbReady();
 
     app.listen(PORT, () => {
       console.log(`PizzaHub server running on port ${PORT}`);
@@ -2011,4 +2179,19 @@ async function startServer() {
   }
 }
 
-startServer();
+// On Vercel the exported app is the handler. Starting a listener and opening
+// MongoDB at module load can kill a cold invocation during transient Atlas
+// selection timeouts; requests go through the readiness gate above instead.
+const isVercel = Boolean(
+  process.env.VERCEL ||
+    process.env.VERCEL_ENV ||
+    process.env.AWS_LAMBDA_FUNCTION_NAME
+);
+
+if (!isVercel) {
+  startServer();
+}
+
+
+
+export default app;
